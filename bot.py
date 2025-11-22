@@ -15,21 +15,15 @@ from aiogram.filters import Command
 import aiohttp
 
 # ---------------- CONFIG ----------------
-TOKEN = os.getenv("TOKEN")
-ADMINS = list(map(int, os.getenv("ADMINS", "").split(",")))
-PAY_LINK = os.getenv("PAY_LINK")
+TOKEN = os.getenv("TOKEN")  # Токен бота из Render
+PAY_LINK = os.getenv("PAY_LINK")  # Ссылка на оплату
+ADMINS = [int(x) for x in os.getenv("ADMINS", "").split(",")]  # Список ID админов
 DB_FILE = "database.db"
-SCREENS_DIR = "screens"
 PING_URL = os.getenv("PING_URL")  # Для Render ping
-
-if not TOKEN:
-    raise ValueError("TOKEN не задан! Установите переменную окружения TOKEN на Render.")
 
 # ---------------- INIT ----------------
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
-
-os.makedirs(SCREENS_DIR, exist_ok=True)
 
 # ---------------- Database helpers ----------------
 async def init_db():
@@ -79,14 +73,6 @@ async def add_ticket(user_id, username, ticket_code):
         )
         await db.commit()
 
-async def delete_ticket(user_id, ticket_code=None):
-    async with aiosqlite.connect(DB_FILE) as db:
-        if ticket_code:
-            await db.execute("DELETE FROM tickets WHERE user_id = ? AND ticket = ?;", (user_id, ticket_code))
-        else:
-            await db.execute("DELETE FROM tickets WHERE user_id = ?;", (user_id,))
-        await db.commit()
-
 async def ticket_for_user(user_id):
     async with aiosqlite.connect(DB_FILE) as db:
         cur = await db.execute("SELECT ticket FROM tickets WHERE user_id = ? ORDER BY id DESC LIMIT 1;", (user_id,))
@@ -110,15 +96,14 @@ def generate_ticket_code():
 user_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="💳 Оплатить участие"), KeyboardButton(text="📘 Правила")],
-        [KeyboardButton(text="📸 Отправить скрин"), KeyboardButton(text="🎟 Мой билет")]
+        [KeyboardButton(text="🎟 Мой билет"), KeyboardButton(text="📸 Отправить скрин")]
     ], resize_keyboard=True
 )
 
 admin_keyboard = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="🎫 Все билеты")],
-        [KeyboardButton(text="🎟 Выдать билет"), KeyboardButton(text="🗑 Удалить билет")],
-        [KeyboardButton(text="🚪 Выйти из панели")]
+        [KeyboardButton(text="🎫 Все билеты"), KeyboardButton(text="🎟 Выдать билет")],
+        [KeyboardButton(text="🗑 Удалить билет"), KeyboardButton(text="🚪 Выйти из панели")]
     ], resize_keyboard=True
 )
 
@@ -140,14 +125,24 @@ async def cmd_start(message: Message):
         await message.answer("Панель администратора:", reply_markup=admin_keyboard)
     else:
         await message.answer(
-            "Привет! Чтобы принять участие:\n1) Оплати участие — 💳\n2) Отправь скрин — 📸\n3) После проверки админ выдаст билет",
+            "Привет! Чтобы принять участие:\n"
+            "1) Оплати участие — 💳\n"
+            "2) Отправь скрин админу — 📸 @Belldari\n"
+            "3) После подтверждения админ выдаст билет",
             reply_markup=user_keyboard
         )
 
 @dp.message(Command("rule"))
 async def cmd_rule(message: Message):
     await message.answer(
-        "📜 *Регламент турнира:*\n1️⃣ Организация не отвечает за интернет.\n2️⃣ Возврат денег невозможен.\n3️⃣ Неявка = техническое поражение.\n4️⃣ Читы = техническое поражение.\n5️⃣ Подставной матч = техническое поражение.\n6️⃣ Один аккаунт на игрока.\n7️⃣ Формат bo3, режим 1на1.",
+        "📜 *Регламент турнира:*\n"
+        "1️⃣ Организация не отвечает за интернет.\n"
+        "2️⃣ Возврат денег невозможен.\n"
+        "3️⃣ Неявка = техническое поражение.\n"
+        "4️⃣ Читы = техническое поражение.\n"
+        "5️⃣ Подставной матч = техническое поражение.\n"
+        "6️⃣ Один аккаунт на игрока.\n"
+        "7️⃣ Формат bo3, режим 1на1.",
         parse_mode="Markdown"
     )
 
@@ -189,7 +184,7 @@ async def handle_buttons(message: Message):
         if ticket: return await message.answer(f"🎟 Ваш билет: `{ticket}`", parse_mode="Markdown")
         return await message.answer("❌ Билета пока нет.")
     if text == "📸 Отправить скрин":
-        return await message.answer("📸 Отправьте скрин администратору: @Belldari и ждите подтверждения.")
+        return await message.answer("Отправьте скрин админ: @Belldari и ждите подтверждения")
 
 # ---------------- STARTUP ----------------
 async def main():
@@ -207,8 +202,8 @@ async def main():
                 except:
                     pass
                 await asyncio.sleep(25*60)
-
     asyncio.create_task(keep_alive())
+
     print("BOT STARTED")
     await dp.start_polling(bot)
 
