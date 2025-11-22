@@ -8,31 +8,27 @@ from datetime import datetime
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import (
-    Message,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    BotCommand
+    Message, ReplyKeyboardMarkup, KeyboardButton,
+    InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 )
 from aiogram.filters import Command
 from dotenv import load_dotenv
+import aiohttp
 
 # ---------------- LOAD ENV ----------------
 load_dotenv()
 
-TOKEN = os.getenv("8295318379:AAGykLEFNGOzK7Yzdn4JQnFFo9EtvXU4pUU")
-ADMINS = [int(x) for x in os.getenv("5174856285", "").split(",") if x]
-
-PAY_LINK = "https://yoomoney.ru/fundraise/1E44DJ5RI06.251118"
+TOKEN = os.getenv("TOKEN")
+ADMINS = [int(x) for x in os.getenv("ADMINS", "").split(",") if x]
+PAY_LINK = os.getenv("PAY_LINK")
 DB_FILE = "database.db"
 SCREENS_DIR = "screens"
+PING_URL = os.getenv("PING_URL")  # Для Render ping
 
 # ---------------- INIT ----------------
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# ---------------- Ensure folders ----------------
 os.makedirs(SCREENS_DIR, exist_ok=True)
 
 # ---------------- Database helpers ----------------
@@ -47,15 +43,6 @@ async def init_db():
             created_at INTEGER
         );""")
         await db.execute("""
-        CREATE TABLE IF NOT EXISTS screens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            username TEXT,
-            file_path TEXT,
-            status TEXT DEFAULT 'new',
-            created_at INTEGER
-        );""")
-        await db.execute("""
         CREATE TABLE IF NOT EXISTS tickets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -66,8 +53,7 @@ async def init_db():
         await db.commit()
 
 async def add_or_update_user(user):
-    if not user:
-        return
+    if not user: return
     uid = user.id
     username = user.username or ""
     first = user.first_name or ""
@@ -84,19 +70,6 @@ async def add_or_update_user(user):
         """, (uid, username, first, last, now))
         await db.commit()
 
-# ---------------- Ticket helpers ----------------
-def generate_ticket_code():
-    digits = ''.join(random.choices("0123456789", k=4))
-    letters = ''.join(random.choices(string.ascii_uppercase, k=5))
-    return f"{digits}-{letters}"
-
-async def ticket_for_user(user_id):
-    async with aiosqlite.connect(DB_FILE) as db:
-        cur = await db.execute("SELECT ticket FROM tickets WHERE user_id=? ORDER BY id DESC LIMIT 1;", (user_id,))
-        row = await cur.fetchone()
-        await cur.close()
-    return row[0] if row else None
-
 async def add_ticket(user_id, username, ticket_code):
     now = int(time.time())
     async with aiosqlite.connect(DB_FILE) as db:
@@ -106,51 +79,49 @@ async def add_ticket(user_id, username, ticket_code):
         )
         await db.commit()
 
-async def delete_ticket(user_id, ticket_code=None):
+async def ticket_for_user(user_id):
     async with aiosqlite.connect(DB_FILE) as db:
-        if ticket_code:
-            await db.execute("DELETE FROM tickets WHERE user_id=? AND ticket=?;", (user_id, ticket_code))
-        else:
-            await db.execute("DELETE FROM tickets WHERE user_id=?;", (user_id,))
-        await db.commit()
+        cur = await db.execute("SELECT ticket FROM tickets WHERE user_id=? ORDER BY id DESC LIMIT 1;", (user_id,))
+        row = await cur.fetchone()
+        await cur.close()
+    return row[0] if row else None
 
-# ---------------- Screens helpers ----------------
-async def add_screen(user_id, username, file_path):
-    now = int(time.time())
+async def get_all_tickets_rows():
     async with aiosqlite.connect(DB_FILE) as db:
-        cur = await db.execute(
-            "INSERT INTO screens (user_id, username, file_path, created_at) VALUES (?, ?, ?, ?);",
-            (user_id, username or "", file_path, now)
-        )
-        await db.commit()
-        return cur.lastrowid
+        cur = await db.execute("SELECT username, ticket, created_at FROM tickets ORDER BY created_at DESC;")
+        rows = await cur.fetchall()
+        await cur.close()
+    return rows
+
+def generate_ticket_code():
+    digits = ''.join(random.choices("0123456789", k=4))
+    letters = ''.join(random.choices(string.ascii_uppercase, k=5))
+    return f"{digits}-{letters}"
 
 # ---------------- Keyboards ----------------
 user_keyboard = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton("💳 Оплатить участие"), KeyboardButton("📘 Правила")],
-        [KeyboardButton("📸 Отправить скрин"), KeyboardButton("🎟 Мой билет")]
-    ],
-    resize_keyboard=True
+        [KeyboardButton(text="💳 Оплатить участие"), KeyboardButton(text="📘 Правила")],
+        [KeyboardButton(text="📸 Отправить скрин"), KeyboardButton(text="🎟 Мой билет")]
+    ], resize_keyboard=True
 )
 
 admin_keyboard = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton("📸 Просмотр скринов"), KeyboardButton("🎫 Все билеты")],
-        [KeyboardButton("🎟 Выдать билет"), KeyboardButton("🗑 Удалить билет")],
-        [KeyboardButton("🚪 Выйти из панели")]
-    ],
-    resize_keyboard=True
+        [KeyboardButton(text="🎫 Все билеты"), KeyboardButton(text="🎟 Выдать билет")],
+        [KeyboardButton(text="🗑 Удалить билет"), KeyboardButton(text="🚪 Выйти из панели")]
+    ], resize_keyboard=True
 )
 
-# ---------------- Bot commands ----------------
+# ---------------- Set commands ----------------
 async def set_bot_commands():
-    await bot.set_my_commands([
+    commands = [
         BotCommand(command="start", description="♻ Перезапуск"),
         BotCommand(command="rule", description="📘 Правила"),
         BotCommand(command="support", description="👨💻 Поддержка"),
         BotCommand(command="admin", description="👨💻 Админ-панель")
-    ])
+    ]
+    await bot.set_my_commands(commands)
 
 # ---------------- Handlers ----------------
 @dp.message(Command("start"))
@@ -167,29 +138,67 @@ async def cmd_start(message: Message):
 @dp.message(Command("rule"))
 async def cmd_rule(message: Message):
     await message.answer(
-        "📜 *Регламент турнира:*\n\n1️⃣ Организация не отвечает за ваше интернет-соединение.\n2️⃣ Возврат денег невозможен.\n3️⃣ Неявка — техническое поражение.\n4️⃣ Читы — дисквалификация.\n5️⃣ Только один аккаунт на игрока.\n6️⃣ Формат bo3.",
+        "📜 *Регламент турнира:*\n1️⃣ Организация не отвечает за интернет.\n2️⃣ Возврат денег невозможен.\n3️⃣ Неявка = техническое поражение.\n4️⃣ Читы = техническое поражение.\n5️⃣ Подставной матч = техническое поражение.\n6️⃣ Один аккаунт на игрока.\n7️⃣ Формат bo3, режим 1на1.",
         parse_mode="Markdown"
     )
 
 @dp.message(Command("support"))
 async def cmd_support(message: Message):
-    await message.answer("👨💻 Поддержка: @Belldari")
+    await message.answer("👨💻 Служба поддержки: @Belldari")
 
-# ---------------- Send screenshots to admin ----------------
-@dp.message(lambda m: m.photo is not None)
-async def photo_handler(message: Message):
+@dp.message()
+async def handle_buttons(message: Message):
+    text = (message.text or "").strip()
     await add_or_update_user(message.from_user)
-    file_id = message.photo[-1].file_id
-    file_info = await bot.get_file(file_id)
-    file_path = os.path.join(SCREENS_DIR, f"{file_id}.jpg")
-    await file_info.download(destination=file_path)
-    screen_id = await add_screen(message.from_user.id, message.from_user.username or "", file_path)
-    await message.answer(f"✅ Скрин сохранён. Отправьте его админу: @Belldari")
 
-# ---------------- Main ----------------
+    # ---------------- ADMIN PANEL ----------------
+    if message.from_user.id in ADMINS:
+        if text == "🎫 Все билеты":
+            rows = await get_all_tickets_rows()
+            if not rows: return await message.answer("🎟 Билетов нет.")
+            out = "🎫 *Выданные билеты:*\n\n"
+            for username, ticket, created_at in rows:
+                dt = datetime.fromtimestamp(created_at).strftime("%d.%m.%Y %H:%M")
+                uname = f"@{username}" if username else "user_id неизвестен"
+                out += f"👤 {uname}\n🎟 {ticket}\n🕒 {dt}\n\n"
+            return await message.answer(out, parse_mode="Markdown")
+        if text == "🎟 Выдать билет":
+            return await message.answer("Используйте команду:\n/give user_id")
+        if text == "🗑 Удалить билет":
+            return await message.answer("Используйте команду:\n/del_ticket user_id [ticket_code]")
+        if text == "🚪 Выйти из панели":
+            await message.answer("Вы вышли из панели администратора.", reply_markup=user_keyboard)
+            return
+
+    # ---------------- USER BUTTONS ----------------
+    if text == "💳 Оплатить участие":
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💳 Оплатить", url=PAY_LINK)]])
+        return await message.answer("Нажми кнопку для оплаты:", reply_markup=kb)
+    if text == "📘 Правила": return await cmd_rule(message)
+    if text == "🎟 Мой билет":
+        ticket = await ticket_for_user(message.from_user.id)
+        if ticket: return await message.answer(f"🎟 Ваш билет: `{ticket}`", parse_mode="Markdown")
+        return await message.answer("❌ Билета пока нет.")
+    if text == "📸 Отправить скрин":
+        return await message.answer("📸 Отправьте скрин администратору: @Belldari и ждите подтверждения.")
+
+# ---------------- STARTUP ----------------
 async def main():
     await init_db()
     await set_bot_commands()
+
+    # ---------------- keep_alive для Render ----------------
+    async def keep_alive():
+        if not PING_URL: return
+        async with aiohttp.ClientSession() as session:
+            while True:
+                try:
+                    async with session.get(PING_URL) as resp:
+                        print(f"Ping {PING_URL}: {resp.status}")
+                except: pass
+                await asyncio.sleep(25*60)
+
+    asyncio.create_task(keep_alive())
     print("BOT STARTED")
     await dp.start_polling(bot)
 

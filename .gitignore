@@ -1,0 +1,23 @@
+# Игнорируем файл с секретами
+.env
+
+# Игнорируем базу данных SQLite
+*.db
+database.db
+bot.db
+
+# Игнорируем папку со скринами
+screens/
+
+# Игнорируем временные файлы Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.swp
+
+# Игнорируем файлы IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
