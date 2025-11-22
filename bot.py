@@ -12,18 +12,18 @@ from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 )
 from aiogram.filters import Command
-from dotenv import load_dotenv
 import aiohttp
 
-# ---------------- LOAD ENV ----------------
-load_dotenv()
-
+# ---------------- CONFIG ----------------
 TOKEN = os.getenv("TOKEN")
-ADMINS = [int(x) for x in os.getenv("ADMINS", "").split(",") if x]
+ADMINS = list(map(int, os.getenv("ADMINS", "").split(",")))
 PAY_LINK = os.getenv("PAY_LINK")
 DB_FILE = "database.db"
 SCREENS_DIR = "screens"
 PING_URL = os.getenv("PING_URL")  # Для Render ping
+
+if not TOKEN:
+    raise ValueError("TOKEN не задан! Установите переменную окружения TOKEN на Render.")
 
 # ---------------- INIT ----------------
 bot = Bot(token=TOKEN)
@@ -79,9 +79,17 @@ async def add_ticket(user_id, username, ticket_code):
         )
         await db.commit()
 
+async def delete_ticket(user_id, ticket_code=None):
+    async with aiosqlite.connect(DB_FILE) as db:
+        if ticket_code:
+            await db.execute("DELETE FROM tickets WHERE user_id = ? AND ticket = ?;", (user_id, ticket_code))
+        else:
+            await db.execute("DELETE FROM tickets WHERE user_id = ?;", (user_id,))
+        await db.commit()
+
 async def ticket_for_user(user_id):
     async with aiosqlite.connect(DB_FILE) as db:
-        cur = await db.execute("SELECT ticket FROM tickets WHERE user_id=? ORDER BY id DESC LIMIT 1;", (user_id,))
+        cur = await db.execute("SELECT ticket FROM tickets WHERE user_id = ? ORDER BY id DESC LIMIT 1;", (user_id,))
         row = await cur.fetchone()
         await cur.close()
     return row[0] if row else None
@@ -108,8 +116,9 @@ user_keyboard = ReplyKeyboardMarkup(
 
 admin_keyboard = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="🎫 Все билеты"), KeyboardButton(text="🎟 Выдать билет")],
-        [KeyboardButton(text="🗑 Удалить билет"), KeyboardButton(text="🚪 Выйти из панели")]
+        [KeyboardButton(text="🎫 Все билеты")],
+        [KeyboardButton(text="🎟 Выдать билет"), KeyboardButton(text="🗑 Удалить билет")],
+        [KeyboardButton(text="🚪 Выйти из панели")]
     ], resize_keyboard=True
 )
 
@@ -123,7 +132,7 @@ async def set_bot_commands():
     ]
     await bot.set_my_commands(commands)
 
-# ---------------- Handlers ----------------
+# ---------------- Admin + User Handlers ----------------
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     await add_or_update_user(message.from_user)
@@ -187,7 +196,7 @@ async def main():
     await init_db()
     await set_bot_commands()
 
-    # ---------------- keep_alive для Render ----------------
+    # keep_alive для Render
     async def keep_alive():
         if not PING_URL: return
         async with aiohttp.ClientSession() as session:
@@ -195,7 +204,8 @@ async def main():
                 try:
                     async with session.get(PING_URL) as resp:
                         print(f"Ping {PING_URL}: {resp.status}")
-                except: pass
+                except:
+                    pass
                 await asyncio.sleep(25*60)
 
     asyncio.create_task(keep_alive())
