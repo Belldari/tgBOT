@@ -13,6 +13,7 @@ from aiogram.types import (
 )
 from aiogram.filters import Command
 import aiohttp
+from aiohttp import web  # Для фейкового порта
 
 # ---------------- CONFIG ----------------
 TOKEN = os.getenv("TOKEN")  # Токен бота из Render
@@ -20,6 +21,7 @@ PAY_LINK = os.getenv("PAY_LINK")  # Ссылка на оплату
 ADMINS = [int(x) for x in os.getenv("ADMINS", "").split(",")]  # Список ID админов
 DB_FILE = "database.db"
 PING_URL = os.getenv("PING_URL")  # Для Render ping
+PORT = int(os.getenv("PORT", 8080))  # Render сам задаёт порт через переменную PORT
 
 # ---------------- INIT ----------------
 bot = Bot(token=TOKEN)
@@ -186,6 +188,20 @@ async def handle_buttons(message: Message):
     if text == "📸 Отправить скрин":
         return await message.answer("Отправьте скрин админ: @Belldari и ждите подтверждения")
 
+# ---------------- FAKE WEB SERVER FOR RENDER ----------------
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+app = web.Application()
+app.router.add_get("/", handle)
+
+async def start_web_server():
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    print(f"Fake web server running on port {PORT}")
+
 # ---------------- STARTUP ----------------
 async def main():
     await init_db()
@@ -203,6 +219,9 @@ async def main():
                     pass
                 await asyncio.sleep(25*60)
     asyncio.create_task(keep_alive())
+
+    # --- fake port ---
+    asyncio.create_task(start_web_server())
 
     print("BOT STARTED")
     await dp.start_polling(bot)
